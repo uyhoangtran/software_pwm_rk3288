@@ -3,6 +3,8 @@
  *
  *  Created on: Oct 9, 2017
  *  Author: Hoang Tran
+ *  Discription: This program is to output PWM signal to GPIO pin on RK3288 use POSIX timer on Linux 3.10
+ *
  */
 #include <stdlib.h>
 #include <stddef.h>
@@ -17,55 +19,76 @@ uint8_t loop;
 
 struct sigevent sev;
 struct itimerspec timer_value;
-
+struct itimerspec timer_zero_value;
+uint8_t count=0;
+uint8_t duty_cycle=101;
 //int close_gpio(void);
 timer_t timer0id;
-static void
-       handler(int sig, siginfo_t *si, void *uc)
+static void timer_handler(int sig, siginfo_t *si, void *uc)
        {
-           gpio_set_value(PWM_PIN,gpio_value);
-           gpio_value^=1;
+			count ++;
+			if(count<=duty_cycle)
+				gpio_set_value(PWM_PIN,1);
+			else
+				gpio_set_value(PWM_PIN,0);
+			if(count == 100)
+				count = 0;
        }
-void signalHandler(int signum)
+void signal_handler(int signum)
 {
 	printf("\n\rctrl-c\n");
 	loop = 0;
 }
-
-
+int set_timer_value(struct itimerspec* p_timer_value,__time_t sec_value,__syscall_slong_t nsec_value)
+{
+	p_timer_value->it_interval.tv_sec = sec_value;
+	p_timer_value->it_interval.tv_nsec = nsec_value;
+	p_timer_value->it_value.tv_sec = sec_value;
+	p_timer_value->it_value.tv_nsec = nsec_value;
+	return 1;
+}
+int start_timer(timer_t timer_id, struct itimerspec* p_timer_value,__time_t sec_value,__syscall_slong_t nsec_value)
+{
+	set_timer_value(p_timer_value,sec_value,nsec_value);
+	timer_settime(timer_id,0,p_timer_value,NULL);
+	return 1;
+}
+int stop_timer(timer_t timer_id)
+{
+	timer_settime(timer_id,0,&timer_zero_value,NULL);
+	return 1;
+}
 int main(void)
 {	struct sigaction sa;
-	long usec;
-	signal(SIGINT, signalHandler);
+	long msec;
+	signal(SIGINT, signal_handler);
 	loop=1;
-
-	scanf("%ld",&usec);
-	timer_value.it_interval.tv_sec = 0;
-	timer_value.it_interval.tv_nsec = usec*1000;
-	timer_value.it_value.tv_sec = timer_value.it_interval.tv_sec;
-	timer_value.it_value.tv_nsec = timer_value.it_interval.tv_nsec;
+	printf("Enter timer interval:");
+	scanf("%ld",&msec);
+	while (duty_cycle>100)
+	{
+		printf("\nEnter duty cycle (must be <= 100): ");
+		scanf("%d",&duty_cycle);
+	}
+	set_timer_value(&timer_zero_value,0,0);
 	init_gpio(PWM_PIN);
 	gpio_set_direction(PWM_PIN,GPIO_OUT);
-	gpio_value=1;
+	gpio_set_value(PWM_PIN,1);
 	sa.sa_flags = SA_SIGINFO;
-	sa.sa_sigaction = handler;
+	sa.sa_sigaction = timer_handler;
 	sigemptyset(&sa.sa_mask);
 	if (sigaction(SIG, &sa, NULL) == -1)
 	               errExit("sigaction");
-	 printf("Blocking signal %d\n", SIG);
-	 sev.sigev_notify = SIGEV_SIGNAL;
-	 sev.sigev_signo = SIG;
-	 sev.sigev_value.sival_ptr = &timer0id;
+	printf("Blocking signal %d\n", SIG);
+	sev.sigev_notify = SIGEV_SIGNAL;
+	sev.sigev_signo = SIG;
+	sev.sigev_value.sival_ptr = &timer0id;
 	timer_create(CLOCK_MONOTONIC,&sev,&timer0id);
-	timer_settime(timer0id,0,&timer_value,NULL);
+	start_timer(timer0id,&timer_value,0,msec*1000);
 	while(loop==1)
 	{
 	}
-	timer_value.it_interval.tv_sec = 0;
-	timer_value.it_interval.tv_nsec = 0;
-	timer_value.it_value.tv_sec = timer_value.it_interval.tv_sec;
-	timer_value.it_value.tv_nsec = timer_value.it_interval.tv_nsec;
-	timer_settime(timer0id,0,&timer_value,NULL);
+	start_timer(timer0id,&timer_value,0,0);
 	close_gpio(PWM_PIN);
 	return 1;
 }
